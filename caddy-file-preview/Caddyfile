@@ -1,0 +1,29 @@
+{$CADDY_LISTEN_ADDR} {
+    root * {$FILE_SERVER_ROOT}
+
+    @markdownRaw {
+        path_regexp markdownraw ^(?P<target>/.*\.md)$
+        query raw=1
+    }
+    handle @markdownRaw {
+        header Content-Type "text/markdown; charset=utf-8"
+        rewrite * {re.markdownraw.target}
+        file_server
+    }
+
+    @markdown path *.md
+    handle @markdown {
+        root * {$CADDY_TEMPLATE_ROOT}
+        rewrite * /markdown.html
+        header Content-Type "text/html; charset=utf-8"
+        templates {
+            root {$FILE_SERVER_ROOT}
+        }
+        file_server
+    }
+
+    @logs path *.log
+    header @logs Content-Type "text/plain; charset=utf-8"
+
+    file_server browse
+}
