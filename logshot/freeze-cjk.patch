@@ -1,0 +1,74 @@
+diff --git a/font.go b/font.go
+index 68725c0..f37ca6a 100644
+--- a/font.go
++++ b/font.go
+@@ -21,6 +21,10 @@ func fontOptions(config *Config) ([]svg.Option, error) {
+ 		switch ext := filepath.Ext(config.Font.File); ext {
+ 		case ".ttf":
+ 			format = svg.TRUETYPE
++		case ".ttc":
++			// TrueType Collection (e.g. Noto Sans CJK). resvg's fontdb can load
++			// these; embed as TRUETYPE so the SVG references the collection.
++			format = svg.TRUETYPE
+ 		case ".woff2":
+ 			format = svg.WOFF2
+ 		case ".woff":
+diff --git a/main.go b/main.go
+index 5302773..4406a88 100644
+--- a/main.go
++++ b/main.go
+@@ -404,7 +404,7 @@ func main() {
+ 		}
+ 
+ 		// could not convert with libsvg, try resvg
+-		svgConversionErr = resvgConvert(doc, imageWidth, imageHeight, config.Output)
++		svgConversionErr = resvgConvert(doc, imageWidth, imageHeight, config.Output, &config)
+ 		if svgConversionErr != nil {
+ 			printErrorFatal("Unable to convert SVG to PNG", svgConversionErr)
+ 		}
+diff --git a/png.go b/png.go
+index b7d0184..d3cad7b 100644
+--- a/png.go
++++ b/png.go
+@@ -3,6 +3,7 @@ package main
+ import (
+ 	"bytes"
+ 	"context"
++	"fmt"
+ 	"os"
+ 	"os/exec"
+ 
+@@ -30,7 +31,7 @@ func libsvgConvert(doc *etree.Document, _, _ float64, output string) error {
+ 	return err //nolint: wrapcheck
+ }
+ 
+-func resvgConvert(doc *etree.Document, w, h float64, output string) error {
++func resvgConvert(doc *etree.Document, w, h float64, output string, config *Config) error {
+ 	svg, err := doc.WriteToBytes()
+ 	if err != nil {
+ 		return err //nolint: wrapcheck
+@@ -56,6 +57,24 @@ func resvgConvert(doc *etree.Document, w, h float64, output string) error {
+ 		printErrorFatal("Unable to load font", err)
+ 	}
+ 
++	// Load the user-specified font file into the resvg font DB as well. Without
++	// this the embedded font in the SVG is ignored by resvg (it uses the fontdb),
++	// so CJK/any custom glyphs fall back to JetBrains Mono and render as tofu.
++	if config.Font.File != "" {
++		bts, err := os.ReadFile(config.Font.File)
++		if err != nil {
++			return fmt.Errorf("invalid font file: %w", err)
++		}
++		if err := fontdb.LoadFontData(bts); err != nil {
++			return fmt.Errorf("unable to load custom font: %w", err)
++		}
++	}
++	if config.Font.Family != "" && config.Font.Family != "JetBrains Mono" && config.Font.File == "" {
++		// A family was requested without an explicit file: let resvg resolve it
++		// from the system font database so CJK-capable system fonts are found.
++		_ = fontdb.SetMonospaceFamily(config.Font.Family)
++	}
++
+ 	pixmap, err := worker.NewPixmap(uint32(w), uint32(h))
+ 	if err != nil {
+ 		printError("Unable to write output", err)

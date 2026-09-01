@@ -1,0 +1,76 @@
+diff --git a/internal/cmd/root.go b/internal/cmd/root.go
+index 20868c6..0b39d6d 100644
+--- a/internal/cmd/root.go
++++ b/internal/cmd/root.go
+@@ -28,6 +28,7 @@ import (
+ 	"path/filepath"
+ 	"strings"
+ 
++	"github.com/golang/freetype/truetype"
+ 	"github.com/gonvenience/bunt"
+ 	"github.com/gonvenience/neat"
+ 
+@@ -80,6 +81,16 @@ window including all terminal colors and text decorations.
+ 		var buf bytes.Buffer
+ 		var pt = ptexec.New()
+ 
++		// Load an external font (e.g. CJK / Nerd Font TTF) if requested
++		if fontFile, err := cmd.Flags().GetString("font-file"); err == nil && fontFile != "" {
++			if err := scaffold.SetFontFile(fontFile, &truetype.Options{
++				Size: 2 * 12,  // factor 2.0 x defaultFontSize(12)
++				DPI:  144,
++			}); err != nil {
++				return fmt.Errorf("failed to load font file: %w", err)
++			}
++		}
++
+ 		// Initialise scaffold with a column sizing so that the
+ 		// content can be wrapped accordingly
+ 		//
+@@ -309,6 +320,8 @@ func init() {
+ 	rootCmd.Flags().Bool("no-decoration", false, "do not draw window decorations")
+ 	rootCmd.Flags().Bool("no-shadow", false, "do not draw window shadow")
+ 	rootCmd.Flags().BoolP("clip-canvas", "s", false, "clip canvas to visible image area (no margin)")
++	// load an external TTF/OTF font so CJK / Nerd Font glyphs render (Hack cannot)
++	rootCmd.Flags().String("font-file", "", "path to a TTF/OTF font file (for CJK / Nerd Font glyphs)")
+ 
+ 	// flags for output related settings
+ 	rootCmd.Flags().StringP("filename", "f", "out.png", "filename of the screenshot")
+diff --git a/internal/img/output.go b/internal/img/output.go
+index 2882994..3487e7c 100644
+--- a/internal/img/output.go
++++ b/internal/img/output.go
+@@ -131,6 +131,33 @@ func (s *Scaffold) SetFontFaceItalic(face imgfont.Face) { s.italic = face }
+ 
+ func (s *Scaffold) SetFontFaceBoldItalic(face imgfont.Face) { s.boldItalic = face }
+ 
++// SetFontFile loads a single TTF/OTF font file and uses it for all four faces
++// (regular/bold/italic/bold-italic). This lets CJK and Nerd Font glyphs render
++// correctly, which the embedded Hack font cannot. Because we pass one file, the
++// bold/italic styles reuse the same face — fine for termshot's pixel output.
++// Hinting is forced to Full (when the font carries hint tables) so CJK glyphs
++// snap to the pixel grid and don't look blurry/soft.
++func (s *Scaffold) SetFontFile(path string, opts *truetype.Options) error {
++	bts, err := os.ReadFile(path)
++	if err != nil {
++		return fmt.Errorf("read font: %w", err)
++	}
++	parsed, err := truetype.Parse(bts)
++	if err != nil {
++		return fmt.Errorf("parse font: %w", err)
++	}
++	if opts == nil {
++		opts = &truetype.Options{}
++	}
++	opts.Hinting = imgfont.HintingFull
++	face := truetype.NewFace(parsed, opts)
++	s.regular = face
++	s.bold = face
++	s.italic = face
++	s.boldItalic = face
++	return nil
++}
++
+ func (s *Scaffold) SetColumns(columns int) { s.columns = columns }
+ 
+ func (s *Scaffold) SetMargin(margin float64) { s.margin = margin * s.factor }
