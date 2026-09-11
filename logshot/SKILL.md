@@ -61,6 +61,9 @@ geometry.
 Launcher source: `logshot.sh`. Install, dependencies, and the herdr OSC 5522
 patch: [`MAINTENANCE.md`](MAINTENANCE.md).
 
+The rationale behind each layer and the non-obvious bugs that shaped it:
+[`README.md`](README.md).
+
 ## Web UI instead of a terminal
 
 `logshot` renders terminal/ANSI text. A dashboard or Web UI on the remote box is

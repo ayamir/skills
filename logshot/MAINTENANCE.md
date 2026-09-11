@@ -2,6 +2,9 @@
 
 Install, dependencies, and the herdr patch that makes `--clipboard` work.
 
+For the design rationale and the bugs behind each layer, see
+[`README.md`](README.md).
+
 ## Install
 
 ```bash
