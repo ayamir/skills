@@ -1,0 +1,28 @@
+# 本仓库只收录自写 skill：caddy-file-preview、logshot
+#
+# 下面这些是 `npx skills add -g` 全局安装的第三方 skill。
+# 全局安装会把内容直接写进本目录（工作区），所以在这里排除，
+# 保证 `git status` 干净、`git add -A` 不会把第三方带进远程仓库。
+# 新增安装的第三方 skill 会以 ?? 未跟踪形式出现在 git status 里 —— 记得补一行。
+#
+# 来源：
+#   mattpocock/skills     : code-review diagnosing-bugs grill-with-docs implement
+#                           to-spec to-tickets handoff writing-for-agents
+#   backnotprop/pstack    : unslop correct how why reflect figure-it-out
+#                           interrogate show-me-your-work
+code-review/
+correct/
+diagnosing-bugs/
+figure-it-out/
+grill-with-docs/
+handoff/
+how/
+implement/
+interrogate/
+reflect/
+show-me-your-work/
+to-spec/
+to-tickets/
+unslop/
+why/
+writing-for-agents/
