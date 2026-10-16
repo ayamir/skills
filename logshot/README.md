@@ -74,7 +74,8 @@ to Freeze's default **1000×386**.
 
 The remote box has no clipboard, so the image must travel over the SSH stream as
 an escape sequence that the *local terminal* interprets and places in its
-clipboard.
+clipboard. (On macOS the clipboard *is* local, so `--clipboard` just calls
+`osascript`; everything below is the remote/OSC path.)
 
 **OSC 52** is the "standard" clipboard escape, but it is text/base64 only and, in
 this environment, **herdr intercepts it** (herdr treats OSC 52 as a clipboard

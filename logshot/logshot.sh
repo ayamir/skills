@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # logshot — snapshot a Herdr pane's terminal output (no GUI needed).
 #
+# Works on macOS and on headless Linux. Rendering needs no display: freeze-cjk
+# renders ANSI to SVG, rsvg-convert rasterizes the SVG to a high-DPI PNG.
+# Install the dependencies with install.sh (see MAINTENANCE.md).
+#
 # Default output is SVG (vector): text is real <text>, rendered with the embedded
 # CJK font, so Chinese/emoji never go blurry and can be scaled losslessly. A clean
 # rose-pine dawn light background (#faf4ed) makes every pane render identically.
@@ -8,7 +12,7 @@
 # Usage:
 #   logshot <pane-id>                     # -> /tmp/herdr-log-<ts>.svg (default)
 #   logshot <pane-id> -o out.svg --width 1200  # explicit width overrides pane size
-#   logshot <pane-id> --clipboard        # also push a PNG (converted from the SVG) to the client clipboard (OSC 52)
+#   logshot <pane-id> --clipboard        # also put a PNG on the clipboard (macOS: osascript; else OSC 5522)
 #   logshot <pane-id> --png              # write a .png instead of .svg
 #   logshot <pane-id> --renderer termshot  # use the (dark macOS-window) termshot-cjk instead
 #   BG=#ffffff THEME=github-light FONT_FILE=/path.ttf LINES=200 logshot <pane-id>
@@ -17,7 +21,7 @@
 # not this. This only renders terminal/ANSI logs.
 set -euo pipefail
 
-[[ "${HERDR_ENV:-}" == "1" ]] || { echo "logshot: not in a Herdr session (HERDR_ENV!=1)" >&2; exit 1; }
+command -v herdr >/dev/null || { echo "logshot: herdr CLI not found in PATH (it reads the pane)" >&2; exit 1; }
 
 pane=${1:?usage: logshot <pane-id> [out.svg] [-o out.svg] [--clipboard] [--png] [--renderer termshot] [flags...]}; shift
 
@@ -41,11 +45,31 @@ source=${SOURCE:-recent}
 lines=${LINES:-120}
 out=${out:-/tmp/herdr-log-$(date +%Y%m%d-%H%M%S)-$$}   # base name (PID avoids same-second collisions), extension added below
 
-# CJK font (system Maple, hinted -> crisp). FONT_FILE overrides.
-cjk_font=${FONT_FILE:-/usr/share/fonts/maple-mono/MapleMonoNormal-NF-CN-Regular.ttf}
-# Use the font's REAL family name so the SVG <text> matches what fontconfig/rsvg
-# resolve. `Maple Mono NF CN` is NOT the system name -> rsvg falls back to DejaVu.
-cjk_family=${FONT_FAMILY:-Maple Mono Normal NF CN}
+# CJK font: first hit in the same list install.sh uses. FONT_FILE overrides.
+cjk_font=${FONT_FILE:-}
+if [[ -z "$cjk_font" ]]; then
+  for f in \
+    "$HOME/Library/Fonts/MapleMonoNormal-NF-CN-Regular.ttf" \
+    "$HOME/Library/Fonts/MapleMono-NF-CN-Regular.ttf" \
+    "$HOME/.local/share/fonts/MapleMonoNormal-NF-CN-Regular.ttf" \
+    "$HOME/.local/share/fonts/MapleMono-NF-CN-Regular.ttf" \
+    /usr/share/fonts/maple-mono/MapleMonoNormal-NF-CN-Regular.ttf \
+    /usr/local/share/fonts/maple-mono/MapleMonoNormal-NF-CN-Regular.ttf
+  do [[ -f "$f" ]] && { cjk_font=$f; break; }; done
+fi
+[[ -f "$cjk_font" ]] || {
+  echo "logshot: no CJK font found; run skills/logshot/install.sh or set FONT_FILE" >&2; exit 1; }
+# The SVG <text> must name the font's REAL family so fontconfig/rsvg resolve it:
+# the release ttf is `Maple Mono Normal NF CN`, the Homebrew cask is
+# `Maple Mono NF CN`. The wrong name silently falls back to DejaVu (no CJK).
+cjk_family=${FONT_FAMILY:-$(fc-scan --format '%{family[0]}' "$cjk_font" 2>/dev/null || true)}
+if [[ -z "$cjk_family" ]]; then
+  # No fontconfig: the two Maple variants report different family names.
+  case "$(basename "$cjk_font")" in
+    MapleMonoNormal-*) cjk_family="Maple Mono Normal NF CN" ;;
+    *)                 cjk_family="Maple Mono NF CN" ;;
+  esac
+fi
 
 tmp=$(mktemp /tmp/logshot-ansi.XXXXXX)
 herdr pane read "$pane" --source "$source" --lines "$lines" --format ansi > "$tmp"
@@ -89,6 +113,19 @@ fi
 
 rm -f "$tmp"
 
+# Locate a chromium/Chrome binary: not on PATH after a macOS `brew install
+# --cask chromium` (the app lives in /Applications).
+chromium_bin() {
+  local c
+  for c in chromium chromium-browser google-chrome \
+           /Applications/Chromium.app/Contents/MacOS/Chromium \
+           "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
+    if [[ "$c" == /* ]]; then [[ -x "$c" ]] && { printf '%s' "$c"; return 0; }
+    else command -v "$c" >/dev/null && { printf '%s' "$c"; return 0; }; fi
+  done
+  return 1
+}
+
 # Convert an SVG to a PNG at high DPI. rsvg-convert is the preferred rasterizer:
 # it's fast, stable on large SVG, and -w scales from the vector (lossless, not
 # blurry). Chromium is the fallback, ImageMagick last.
@@ -103,13 +140,14 @@ svg_to_png() {
     scale=${SCALE:-2}
     rsvg-convert -w "$((w*scale))" "$svg" -o "$out" >/dev/null 2>&1 && [[ -s "$out" ]] && return 0
   fi
-  if command -v chromium >/dev/null; then
+  local chrome
+  if chrome=$(chromium_bin); then
     w=$(grep -oE 'width="[0-9.]+' "$svg" | grep -oE '[0-9.]+' || true)
     h=$(grep -oE 'height="[0-9.]+' "$svg" | grep -oE '[0-9.]+' || true)
     w=${w%%.*}; h=${h%%.*}   # drop decimal: window-size needs integers
     w=${w:-1200}; h=${h:-200}
     scale=${SCALE:-2}
-    chromium --headless=new --disable-gpu --no-sandbox \
+    "$chrome" --headless=new --disable-gpu --no-sandbox \
       --screenshot="$out" --window-size="$w,$h" \
       --force-device-scale-factor="$scale" \
       --default-background-color=00000000 "file://$svg" >/dev/null 2>&1 || true
@@ -126,11 +164,16 @@ if [[ "$fmt" == "png" && "$out" == *.svg ]]; then
   out="$png"
 fi
 
-# Push a PNG to the local clipboard. Prefer OSC 5522 (Kitty's streaming,
-# multi-type, acknowledged clipboard protocol) via tty7-clip.py: it carries the
-# image as image/png and — critically — herdr only intercepts standard OSC 52, so
-# OSC 5522 passes straight through herdr to the local tty7 terminal. Standard
-# OSC 52 (text-only) is the fallback for terminals that speak only that.
+# Push a PNG to the clipboard.
+#
+# macOS: `--clipboard` writes the image with osascript — the clipboard is local,
+# no escape sequence and no terminal support needed.
+#
+# Linux/remote: OSC 5522 (Kitty's streaming, multi-type, acknowledged clipboard
+# protocol) via tty7-clip.py. It carries the image as image/png and — critically
+# — herdr only intercepts standard OSC 52, so OSC 5522 passes straight through
+# herdr to the local tty7 terminal. Standard OSC 52 (text-only) is the fallback.
+# LOGSHOT_CLIPBOARD=native|osc forces one method (default: native on macOS).
 #
 # LOGSHOT_DEBUG=1 adds per-step diagnostics (each emits one line to stderr).
 if [[ "$clipboard" == 1 ]]; then
@@ -142,13 +185,22 @@ if [[ "$clipboard" == 1 ]]; then
     dbg "rasterize SVG -> $cb"
     svg_to_png "$out" "$cb"
     if [[ -s "$cb" ]]; then
-      dbg "svg_to_png OK: $(stat -c%s "$cb") bytes"
+      dbg "svg_to_png OK: $(wc -c <"$cb" | tr -d ' ') bytes"
     else
       dbg "svg_to_png FAILED: no file"
     fi
     src="$cb"
   fi
-  if command -v tty7-clip.py >/dev/null; then
+  method=${LOGSHOT_CLIPBOARD:-$([[ "$(uname -s)" == Darwin ]] && echo native || echo osc)}
+  if [[ "$method" == native ]] && command -v osascript >/dev/null; then
+    if [[ "$src" != *.png ]]; then
+      echo "logshot: --clipboard needs a PNG; no rasterizer (rsvg-convert) available" >&2
+    else
+      dbg "osascript: set clipboard from $src"
+      osascript -e "set the clipboard to (read (POSIX file \"$src\") as «class PNGf»)" \
+        && dbg "macOS clipboard set" || echo "logshot: clipboard write failed" >&2
+    fi
+  elif command -v tty7-clip.py >/dev/null; then
     dbg "emit OSC 5522 via tty7-clip.py for $src"
     # The OSC 5522 frames go to logshot's stderr (via >&2, so stdout stays a
     # clean path). Do NOT let a write hiccup abort the whole script under
@@ -160,7 +212,8 @@ if [[ "$clipboard" == 1 ]]; then
     dbg "OSC 5522 emitted"
   else
     dbg "tty7-clip.py MISSING -> fallback OSC 52"
-    printf '\033]52;c;%s\a' "$(base64 -w0 "$src")" >&2
+    # `base64 -w0` is GNU-only; strip the newlines instead (BSD/macOS base64).
+    printf '\033]52;c;%s\a' "$(base64 < "$src" | tr -d '\n')" >&2
     echo "logshot: PNG pushed via OSC 52 to client clipboard (${src})..." >&2
   fi
 fi

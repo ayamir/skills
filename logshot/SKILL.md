@@ -1,19 +1,44 @@
 ---
 name: logshot
-description: "Snapshot a Herdr pane's terminal output as an image on a headless/no-GUI box, with correct CJK/Chinese + Nerd Font glyphs. Use when the user wants a screenshot or visual evidence of logs, terminal output, or a running process ('截图', 'screenshot the logs'). Requires HERDR_ENV=1. For browser/Web UI screenshots use chromium headless instead."
+description: "Snapshot a Herdr pane's terminal output as an image (SVG or high-DPI PNG) with correct CJK/Chinese + Nerd Font glyphs. Works on macOS and on a headless Linux box — no display server needed. Use when the user wants a screenshot or visual evidence of logs, terminal output, test results, or a running process ('截图', 'screenshot the logs'). Reads Herdr panes; for browser/Web UI screenshots use chromium headless instead."
 ---
 
 # Logshot
 
 Renders a Herdr pane's ANSI output to an image with no display server, no X, no
-Xvfb. Rose-pine dawn light backdrop so every pane comes out on the same clean
-off-white; Maple Mono NF CN so CJK and Nerd Font icons render correctly.
+Xvfb — on macOS or on a headless Linux box. Rose-pine dawn light backdrop so
+every pane comes out on the same clean off-white; Maple Mono NF CN so CJK and
+Nerd Font icons render correctly.
+
+## Setup (once per machine)
+
+```bash
+bash ~/.agents/skills/logshot/install.sh
+```
+
+Installs `logshot` into `~/.local/bin` and every dependency below. Use
+`TERMSHOT=0` to skip the optional alt renderer, `CHROMIUM=1` to also install
+chromium, `FONT=0` to skip the font.
+
+| Dependency | Why | macOS | Debian/Ubuntu |
+|---|---|---|---|
+| `rsvg-convert` (librsvg) | SVG → high-DPI PNG (the only rasterizer) | `brew install librsvg` | `apt install librsvg2-bin` |
+| Maple Mono NF CN | CJK + Nerd Font glyphs (else tofu) | `brew install --cask font-maple-mono-nf-cn` | release zip → `~/.local/share/fonts` |
+| `go` | builds `freeze-cjk` from `freeze-cjk.patch` | `brew install go` | `apt install golang` |
+| `jq` | pane geometry (`herdr pane layout`) → canvas width | `brew install jq` | `apt install jq` |
+| `herdr` | reads the pane (`herdr pane read`) | `brew install herdr` | — |
+| `chromium` (optional) | last-resort rasterizer, Web UI shots | `brew install --cask chromium` | `apt install chromium` |
+
+If the image shows blank boxes instead of Chinese, the font family did not
+resolve: check `fc-scan --format '%{family}' ~/Library/Fonts/Maple*Regular.ttf`
+and pass `FONT_FAMILY=...` — the release ttf is `Maple Mono Normal NF CN`, the
+Homebrew cask is `Maple Mono NF CN`.
 
 ## First-pass evidence workflow
 
 1. Locate the pane and set its final geometry before producing evidence:
    ```bash
-   herdr pane list --workspace "$HERDR_WORKSPACE_ID"
+   herdr pane list                       # add --workspace "$HERDR_WORKSPACE_ID" inside Herdr
    ```
    Make the pane wide enough for the command and key output. Resizing after the
    output was printed does not reliably repair its old soft wraps; rerun the
@@ -49,8 +74,9 @@ geometry.
 ## Options
 
 - default → **SVG path on stdout**; vector, so text stays crisp at any zoom.
-- `--clipboard` → also writes the PNG to the user's local clipboard (OSC 5522).
-  stdout still carries only the SVG path; the payload goes to stderr.
+- `--clipboard` → also puts the PNG on the clipboard: on macOS via `osascript`
+  (local clipboard, no terminal support needed); elsewhere via OSC 5522 through
+  the terminal. stdout still carries only the SVG path.
 - `--png` → high-DPI PNG instead of SVG.
 - `SOURCE=visible` → the rendered viewport instead of recent scrollback.
 - `LINES=40` → fewer lines.
@@ -73,3 +99,6 @@ a headless chromium job:
 chromium --headless=new --disable-gpu --window-size=1600,1200 \
   --screenshot=/tmp/ui.png "http://127.0.0.1:9090/"
 ```
+
+On macOS the cask binary is not on PATH:
+`/Applications/Chromium.app/Contents/MacOS/Chromium`.
